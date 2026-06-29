@@ -1,0 +1,51 @@
+# Prometheus configuration for API Gateway monitoring
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'api-gateway'
+    replica: '{{.ExternalURL}}'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Rule files
+rule_files:
+  # - "rules/*.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Gateway metrics
+  - job_name: 'api-gateway'
+    static_configs:
+      - targets: ['gateway:9090']
+        labels:
+          service: 'api-gateway'
+          env: 'production'
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  # Gateway instances (multiple replicas)
+  - job_name: 'api-gateway-instances'
+    static_configs:
+      - targets:
+          - 'gateway:9090'
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Redis exporter
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 15s
+
+  # Node exporter for host metrics
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 15s
