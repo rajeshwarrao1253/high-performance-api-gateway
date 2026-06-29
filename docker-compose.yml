@@ -1,0 +1,164 @@
+# High-Performance API Gateway - Docker Compose Stack
+# This stack includes: Gateway, Redis, 2 example backend services, Prometheus, Grafana
+
+version: '3.8'
+
+services:
+  # API Gateway
+  gateway:
+    build: .
+    container_name: api-gateway
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    environment:
+      - GATEWAY_PORT=8080
+      - REDIS_ADDR=redis:6379
+    volumes:
+      - ./config/gateway.yaml:/etc/gateway/gateway.yaml:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      user-service-1:
+        condition: service_started
+      order-service-1:
+        condition: service_started
+    networks:
+      - gateway-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Redis for caching and rate limiting
+  redis:
+    image: redis:7-alpine
+    container_name: gateway-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    networks:
+      - gateway-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # User Service Backend 1
+  user-service-1:
+    image: kennethreitz/httpbin:latest
+    container_name: user-service-1
+    environment:
+      - PORT=8081
+    networks:
+      - gateway-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/get"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # User Service Backend 2
+  user-service-2:
+    image: kennethreitz/httpbin:latest
+    container_name: user-service-2
+    environment:
+      - PORT=8081
+    networks:
+      - gateway-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/get"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Order Service Backend 1
+  order-service-1:
+    image: kennethreitz/httpbin:latest
+    container_name: order-service-1
+    environment:
+      - PORT=8082
+    networks:
+      - gateway-network
+    restart: unless-stopped
+
+  # Order Service Backend 2
+  order-service-2:
+    image: kennethreitz/httpbin:latest
+    container_name: order-service-2
+    environment:
+      - PORT=8082
+    networks:
+      - gateway-network
+    restart: unless-stopped
+
+  # Echo Service (catch-all)
+  echo-service:
+    image: kennethreitz/httpbin:latest
+    container_name: echo-service
+    environment:
+      - PORT=8083
+    networks:
+      - gateway-network
+    restart: unless-stopped
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: gateway-prometheus
+    ports:
+      - "9091:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - gateway-network
+    restart: unless-stopped
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: gateway-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/dashboard.json:/etc/grafana/provisioning/dashboards/gateway-dashboard.json:ro
+    networks:
+      - gateway-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+networks:
+  gateway-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
